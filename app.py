@@ -445,41 +445,56 @@ def display_category_view(data, selected_category, selected_year, unique_maisons
             all_years_with_data.update(maison_data.keys())
         all_years_with_data = sorted(list(all_years_with_data))
         
-        # Create table
+        # Create table with total counts
         table_data = []
         for maison in sorted(activities_data.keys()):
             row_data = {'Maison': maison}
+            total_count = 0
             for year in all_years_with_data:
                 if year in activities_data[maison]:
                     # Join multiple activities with line breaks
                     activities = activities_data[maison][year]
                     numbered_activities = [f"{i+1}. {activity}" for i, activity in enumerate(activities)]
                     row_data[year] = "<br>".join(numbered_activities)
+                    total_count += len(activities)
                 else:
                     row_data[year] = ""
+            row_data['Total'] = total_count
             table_data.append(row_data)
         
         if table_data:
             df_table = pd.DataFrame(table_data)
             
-            # Display as HTML table for better formatting
-            html_table = "<table style='width:100%; border-collapse: collapse;'>"
-            html_table += "<thead><tr style='background-color: #f0f2f6;'>"
-            html_table += f"<th style='border: 1px solid #ddd; padding: 8px;'>Maison</th>"
-            for year in all_years_with_data:
-                html_table += f"<th style='border: 1px solid #ddd; padding: 8px; text-align: center;'>{year}</th>"
-            html_table += "</tr></thead><tbody>"
+            # Use Streamlit's native table with sorting capability
+            df_table_formatted = df_table.copy()
             
-            for _, row in df_table.iterrows():
-                html_table += "<tr>"
-                html_table += f"<td style='border: 1px solid #ddd; padding: 8px; font-weight: bold;'>{row['Maison']}</td>"
-                for year in all_years_with_data:
-                    cell_content = row[year] if row[year] != "" else ""
-                    html_table += f"<td style='border: 1px solid #ddd; padding: 8px; vertical-align: top;'>{cell_content}</td>"
-                html_table += "</tr>"
+            # Convert HTML strings back to simple strings for better display
+            for col in all_years_with_data:
+                df_table_formatted[col] = df_table_formatted[col].str.replace('<br>', '\n', regex=False)
             
-            html_table += "</tbody></table>"
-            st.markdown(html_table, unsafe_allow_html=True)
+            # Reorder columns to put Total after Maison
+            columns_order = ['Maison', 'Total'] + all_years_with_data
+            df_table_formatted = df_table_formatted[columns_order]
+            
+            # Display using st.dataframe with sortable columns
+            st.dataframe(
+                df_table_formatted,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    'Maison': st.column_config.TextColumn(
+                        'Maison',
+                        help='Maison name',
+                        width='medium'
+                    ),
+                    'Total': st.column_config.NumberColumn(
+                        'Total Activities',
+                        help=f'Total number of {selected_category} activities across all years',
+                        width='small',
+                        format='%d'
+                    )
+                }
+            )
         else:
             st.info(f"No {selected_category} activities found for any Maison in the available data.")
     else:
