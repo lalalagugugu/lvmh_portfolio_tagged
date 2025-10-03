@@ -108,7 +108,7 @@ def generate_verified_mentions(year):
 def main():
     """Generate verified mentions for all years"""
     
-    years = ['2022', '2023', '2024', '2025H1']
+    years = ['2019', '2022', '2023', '2024', '2025H1']
     
     print("=== GENERATING VERIFIED MENTIONS WORKBOOKS ===")
     print()

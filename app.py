@@ -61,24 +61,33 @@ def load_data():
     data = {}
     
     # Load mentions data for all available years (prioritize verified files)
-    years = ['2022', '2023', '2024', '2025H1']
+    years = ['2019', '2020', '2021', '2022', '2023', '2024', '2025H1']
     for year in years:
         # Try verified mentions first, fall back to original
+        # Priority order: standardized verified > standardized > verified > original
+        standardized_verified_file = f'lvmh_{year}FY_maison_mentions_standardized_verified.xlsx' if year != '2025H1' else f'lvmh_{year}_maison_mentions_standardized_verified.xlsx'
+        standardized_file = f'lvmh_{year}FY_maison_mentions_standardized.xlsx' if year != '2025H1' else f'lvmh_{year}_maison_mentions_standardized.xlsx'
         verified_mentions_file = f'lvmh_{year}FY_maison_mentions_verified.xlsx' if year != '2025H1' else f'lvmh_{year}_maison_mentions_verified.xlsx'
         original_mentions_file = f'lvmh_{year}FY_maison_mentions.xlsx' if year != '2025H1' else f'lvmh_{year}_maison_mentions.xlsx'
-        details_file = f'lvmh_{year}FY_maison_details.xlsx' if year != '2025H1' else f'lvmh_{year}_maison_details.xlsx'
+        details_file = f'lvmh_{year}FY_maison_details_standardized.xlsx' if year != '2025H1' else f'lvmh_{year}_maison_details_standardized.xlsx'
         
-        # Load mentions data (prefer verified)
-        mentions_file = verified_mentions_file if os.path.exists(verified_mentions_file) else original_mentions_file
+        # Load mentions data (prefer standardized verified)
+        mentions_file = None
+        if os.path.exists(standardized_verified_file):
+            mentions_file = standardized_verified_file
+        elif os.path.exists(standardized_file):
+            mentions_file = standardized_file
+        elif os.path.exists(verified_mentions_file):
+            mentions_file = verified_mentions_file
+        else:
+            mentions_file = original_mentions_file
         if os.path.exists(mentions_file):
             df = pd.read_excel(mentions_file)
-            # Standardize Bulgari spelling
-            df['Maison'] = df['Maison'].str.replace('Bvlgari', 'Bulgari', regex=False)
+            # Data should already be standardized from source
             data[f'mentions_{year}'] = df
         if os.path.exists(details_file):
             df = pd.read_excel(details_file)
-            # Standardize Bulgari spelling
-            df['Maison'] = df['Maison'].str.replace('Bvlgari', 'Bulgari', regex=False)
+            # Data should already be standardized from source  
             data[f'details_{year}'] = df
     
     return data
@@ -90,13 +99,108 @@ def calculate_total_mentions(df):
     df['Total_Mentions'] = df[categories].sum(axis=1)
     return df
 
+def create_cross_year_ranking(data):
+    """Create ranking table with mentions and rankings for all years"""
+    years = ['2019', '2020', '2021', '2022', '2023', '2024', '2025H1']
+    
+    # Get all unique Maisons across all years
+    all_maisons = set()
+    for year in years:
+        year_key = f'mentions_{year}'
+        if year_key in data:
+            year_df = data[year_key].copy()
+            all_maisons.update(year_df['Maison'].unique())
+    
+    # Prepare cross-year data
+    cross_year_data = []
+    
+    for maison in sorted(all_maisons):
+        row_data = {'Maison': maison}
+        
+        for year in years:
+            year_key = f'mentions_{year}'
+            if year_key in data:
+                year_df = data[year_key].copy()
+                year_df['Maison'] = year_df['Maison'].str.replace('Bvlgari', 'Bulgari', regex=False)
+                maison_data = year_df[year_df['Maison'] == maison]
+                
+                if not maison_data.empty:
+                    total_mentions = maison_data.iloc[0]['Total_Mentions']
+                    row_data[f'{year}_mentions'] = total_mentions
+                else:
+                    row_data[f'{year}_mentions'] = 0
+        
+        # Calculate rankings for each year
+        for year in years:
+            year_key = f'mentions_{year}'
+            if year_key in data:
+                year_df = data[year_key].copy()
+                year_df['Maison'] = year_df['Maison'].str.replace('Bvlgari', 'Bulgari', regex=False)
+                year_df['Rank'] = year_df['Total_Mentions'].rank(method='min', ascending=False).astype(int)
+                
+                maison_rank = year_df[year_df['Maison'] == maison]
+                if not maison_rank.empty:
+                    row_data[f'{year}_rank'] = maison_rank.iloc[0]['Rank']
+                else:
+                    row_data[f'{year}_rank'] = None
+            
+        cross_year_data.append(row_data)
+    
+    return pd.DataFrame(cross_year_data)
+
+def create_total_mentions_chart(data):
+    """Create stacked bar chart showing total mentions by category across all years"""
+    years = ['2019', '2020', '2021', '2022', '2023', '2024', '2025H1']
+    categories = ['Product', 'Place', 'Partnership', 'ESG', 'Performance', 
+                  'Digital', 'Pricing', 'Promotion', 'People', 'Awards']
+    
+    chart_data = []
+    for year in years:
+        year_key = f'mentions_{year}'
+        if year_key in data:
+            year_df = data[year_key]
+            for category in categories:
+                category_total = year_df[category].sum()
+                chart_data.append({
+                    'Year': year,
+                    'Category': category,
+                    'Mentions': category_total
+                })
+    
+    if chart_data:
+        df_chart = pd.DataFrame(chart_data)
+        
+        fig = px.bar(
+            df_chart,
+            x='Year',
+            y='Mentions',
+            color='Category',
+            title='Total Mentions by Year and Category',
+            color_discrete_sequence=px.colors.qualitative.Set3
+        )
+        
+        # Ensure x-axis treats years as categories
+        fig.update_xaxes(type='category')
+        
+        fig.update_layout(
+            height=400,
+            showlegend=True,
+            xaxis_tickangle=-45
+        )
+        
+        return fig
+    return None
+
 def get_previous_year(selected_year):
     """Get the previous year for comparison"""
     year_mapping = {
         '2025H1': '2024',
         '2024': '2023',
         '2023': '2022',
-        '2022': None
+        '2022': '2021',
+        '2021': '2020',
+        '2020': '2019',
+        '2019': None
     }
     return year_mapping.get(selected_year)
 
@@ -278,7 +382,7 @@ def display_maison_details(data, selected_maison, selected_year):
     
     # Get available years for this Maison
     available_years = []
-    for year in ['2022', '2023', '2024', '2025H1']:
+    for year in ['2019', '2020', '2021', '2022', '2023', '2024', '2025H1']:
         year_key = f'mentions_{year}'
         if year_key in data:
             mentions_df = data[year_key]
@@ -401,7 +505,7 @@ def main():
     
     # Check if verified data is being used
     verified_years = []
-    years = ['2022', '2023', '2024', '2025H1']
+    years = ['2019', '2020', '2021', '2022', '2023', '2024', '2025H1']
     for year in years:
         verified_file = f'lvmh_{year}FY_maison_mentions_verified.xlsx' if year != '2025H1' else f'lvmh_{year}_maison_mentions_verified.xlsx'
         if os.path.exists(verified_file) and f'mentions_{year}' in data:
@@ -428,13 +532,28 @@ def main():
     
     selected_year = st.sidebar.selectbox("Fiscal Year", available_years, index=len(available_years)-1)
     
-    # Available Maisons
-    year_key = f'mentions_{selected_year}'
-    if year_key in data:
-        available_maisons = sorted(data[year_key]['Maison'].unique())
-        selected_maison = st.sidebar.selectbox("Maison (for detailed view)", ["All"] + available_maisons)
+    # Available Maisons (unique across all years) - using standardized data
+    unique_maisons = set()
+    for year in ['2019', '2020', '2021', '2022', '2023', '2024', '2025H1']:
+        year_key = f'mentions_{year}'
+        if year_key in data:
+            year_df = data[year_key].copy()
+            # Names should already be standardized in the new files, but apply minimal cleanup if needed
+            year_df['Maison'] = year_df['Maison'].str.strip()
+            unique_maisons.update(year_df['Maison'].unique())
+    
+    unique_maisons = sorted(list(unique_maisons))
+    selected_maison_mode = st.sidebar.radio("View Mode", ["Overview", "Single Maison", "Multiple Maisons"])
+    
+    if selected_maison_mode == "Single Maison":
+        selected_maison = st.sidebar.selectbox("Select Maison", unique_maisons)
+        selected_maisons = []  # Initialize empty list
+    elif selected_maison_mode == "Multiple Maisons":
+        selected_maisons = st.sidebar.multiselect("Select Maisons", unique_maisons, default=[unique_maisons[0]] if unique_maisons else [])
+        selected_maison = "All"  # Initialize to avoid error
     else:
         selected_maison = "All"
+        selected_maisons = []  # Initialize empty list
     
     # Available categories
     categories = ['Product', 'Place', 'Partnership', 'ESG', 'Performance', 
@@ -442,15 +561,15 @@ def main():
     selected_category = st.sidebar.selectbox("Activity Category", ["All"] + categories)
     
     # Main content
-    if selected_maison == "All":
+    if selected_maison_mode == "Overview" or (selected_maison_mode != "Multiple Maisons" and selected_maison == "All"):
         # KPI Dashboard
         st.header("📊 Key Performance Indicators")
         
         most_mentioned, prev_most_mentioned, category_leaders, prev_category_leaders = get_kpis(data, selected_year)
         
         if most_mentioned is not None:
-            # Simplified KPI Cards
-            col1, col2 = st.columns(2)
+            # KPI Cards with merged information
+            col1, col2, col3 = st.columns(3)
             
             with col1:
                 # Most Mentioned Maison with previous year comparison
@@ -468,14 +587,39 @@ def main():
                 """, unsafe_allow_html=True)
             
             with col2:
-                # Total Maisons with previous year comparison
-                total_maisons = len(data[year_key])
-                prev_total = ""
+                # Total Mentions with previous year comparison
+                total_mentions = data[year_key]['Total_Mentions'].sum()
+                
+                prev_total_mentions = ""
                 if prev_most_mentioned is not None and get_previous_year(selected_year):
                     prev_year_key = f'mentions_{get_previous_year(selected_year)}'
                     if prev_year_key in data:
-                        prev_total = len(data[prev_year_key])
-                        prev_text = f"<div style='font-size: 0.7rem; opacity: 0.8; margin-top: 0.3rem;'>Previous: {prev_total}</div>"
+                        prev_total_mentions = data[prev_year_key]['Total_Mentions'].sum()
+                        prev_text = f"<div style='font-size: 0.7rem; opacity: 0.8; margin-top: 0.3rem;'>Previous: {prev_total_mentions}</div>"
+                    else:
+                        prev_text = ""
+                else:
+                    prev_text = ""
+                
+                st.markdown(f"""
+                <div class="kpi-card">
+                    <div class="kpi-value">{total_mentions}</div>
+                    <div class="kpi-label">Total Mentions</div>
+                    <div style="font-size: 0.8rem; margin-top: 0.5rem;">All Categories</div>
+                    {prev_text}
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col3:
+                # Total Maisons
+                total_maisons = len(data[year_key])
+                
+                prev_maisons = ""
+                if prev_most_mentioned is not None and get_previous_year(selected_year):
+                    prev_year_key = f'mentions_{get_previous_year(selected_year)}'
+                    if prev_year_key in data:
+                        prev_maisons = len(data[prev_year_key])
+                        prev_text = f"<div style='font-size: 0.7rem; opacity: 0.8; margin-top: 0.3rem;'>Previous: {prev_maisons}</div>"
                     else:
                         prev_text = ""
                 else:
@@ -489,6 +633,13 @@ def main():
                     {prev_text}
                 </div>
                 """, unsafe_allow_html=True)
+            
+            # Total Mentions by Year chart
+            st.subheader("📈 Total Mentions by Year")
+            
+            total_chart = create_total_mentions_chart(data)
+            if total_chart:
+                st.plotly_chart(total_chart, use_container_width=True)
             
             # Category Leaders Table - only show categories with winners
             st.subheader("🏆 Category Leaders")
@@ -539,17 +690,134 @@ def main():
             if fig:
                 st.plotly_chart(fig, use_container_width=True)
             
-            # Overall ranking
-            st.subheader("📊 Overall Maison Ranking")
+            # Cross-year ranking table
+            st.subheader("📊 Cross-Year Maison Ranking")
             
-            current_df = calculate_total_mentions(data[year_key].copy())
-            ranking_df = current_df[['Maison', 'Total_Mentions'] + categories].sort_values('Total_Mentions', ascending=False)
+            cross_year_df = create_cross_year_ranking(data)
             
-            st.dataframe(ranking_df, use_container_width=True)
+            # Show ranking explanation
+            st.info("**Ranking**: Standard ranking where tied Maisons share the same rank and subsequent ranks are skipped.")
+            
+            st.dataframe(cross_year_df, use_container_width=True)
         
-    else:
+    elif selected_maison_mode == "Single Maison":
         # Individual Maison Details
         display_maison_details(data, selected_maison, selected_year)
+    
+    elif selected_maison_mode == "Multiple Maisons":
+        # Multiple Maisons comparison
+        if selected_maisons:
+            st.subheader("📊 Multiple Maisons Comparison")
+            
+            # Create separate stacked bar charts for each Maison
+            years = ['2019', '2020', '2021', '2022', '2023', '2024', '2025H1']
+            categories = ['Product', 'Place', 'Partnership', 'ESG', 'Performance', 
+                          'Digital', 'Pricing', 'Promotion', 'People', 'Awards']
+            
+            # Layout: Side-by-side charts for first 2 Maisons
+            if len(selected_maisons) >= 1:
+                col1, col2 = st.columns(2)
+                
+                chart_maisons = selected_maisons[:2]  # Only show first 2 for charts
+                
+                for i, maison in enumerate(chart_maisons):
+                    with col1 if i == 0 else col2:
+                        st.subheader(f"📊 {maison}")
+                        
+                        # Prepare chart data for this Maison
+                        chart_data = []
+                        
+                        for year in years:
+                            year_key = f'mentions_{year}'
+                            if year_key in data:
+                                maison_data = data[year_key][data[year_key]['Maison'] == maison]
+                                if not maison_data.empty:
+                                    maison_row = maison_data.iloc[0]
+                                    for category in categories:
+                                        chart_data.append({
+                                            'Year': year,
+                                            'Category': category,
+                                            'Mentions': maison_row[category]
+                                        })
+                        
+                        if chart_data:
+                            df_chart = pd.DataFrame(chart_data)
+                            
+                            # Create stacked bar chart for this Maison
+                            fig = px.bar(
+                                df_chart,
+                                x='Year',
+                                y='Mentions',
+                                color='Category',
+                                title=f'{maison}: Multi-Year Trend',
+                                color_discrete_sequence=px.colors.qualitative.Set3
+                            )
+                            
+                            # Ensure categorical x-axis
+                            fig.update_xaxes(type='category')
+                            fig.update_layout(
+                                height=400,
+                                showlegend=True,
+                                xaxis_tickangle=-45
+                            )
+                            
+                            st.plotly_chart(fig, use_container_width=True)
+            
+            # Detailed activities table for selected fiscal year
+            st.subheader(f"📋 Detailed Activities ({selected_year})")
+            
+            # Create comparison table for selected Maisons
+            year_details_key = f'details_{selected_year}'
+            if year_details_key in data:
+                # Prepare comparison table data
+                comparison_data = []
+                
+                for category in categories:
+                    category_row = {'Category': category}
+                    
+                    for maison in selected_maisons:
+                        maison_details_data = data[year_details_key][data[year_details_key]['Maison'] == maison]
+                        
+                        if not maison_details_data.empty:
+                            details_row = maison_details_data.iloc[0]
+                            activities_in_category = []
+                            
+                            # Collect activities for this category and maison
+                            for col in details_row.index:
+                                if col.startswith(f'{category}_') and pd.notna(details_row[col]) and str(details_row[col]).strip():
+                                    activity_text = str(details_row[col]).strip()
+                                    if activity_text != '0' and activity_text.lower() != 'nan':
+                                        activities_in_category.append(activity_text)
+                            
+                            # Format activities with numbering
+                            if activities_in_category:
+                                numbered_activities = []
+                                for idx, activity in enumerate(activities_in_category, 1):
+                                    numbered_activities.append(f"{idx}. {activity}")
+                                category_row[maison] = '\\n'.join(numbered_activities)
+                            else:
+                                category_row[maison] = 'No activities'
+                        else:
+                            category_row[maison] = 'No data'
+                    
+                    comparison_data.append(category_row)
+                
+                if comparison_data:
+                    comparison_df = pd.DataFrame(comparison_data)
+                    comparison_df = comparison_df.set_index('Category')
+                    
+                    # Display with numbered activities visible as separate lines
+                    st.markdown("**Activity Descriptions (numbered)**")
+                    st.dataframe(comparison_df, use_container_width=True)
+                    
+                    # Note about numbered entries
+                    st.info("💡 **Note**: Multiple activities in the same category are numbered and displayed on separate lines within the same cell.")
+                else:
+                    st.info("No activity data found.")
+            else:
+                st.info(f"No details data found for {selected_year}.")
+        else:
+            st.info("Please select at least one Maison for comparison.")
     
     # Footer
     st.markdown("---")
