@@ -376,6 +376,115 @@ def create_stacked_bar_chart(data, selected_year, top_n=10):
     
     return fig
 
+def display_category_view(data, selected_category, selected_year, unique_maisons):
+    """Display category-specific view with total counts by year and activities table"""
+    st.header(f"📊 {selected_category} Activities Analysis")
+    
+    # Get years data
+    years = ['2019', '2020', '2021', '2022', '2023', '2024', '2025H1']
+    
+    # 1. Total Counts by Year Chart
+    st.subheader(f"📈 Total {selected_category} Mentions by Year")
+    
+    year_totals = []
+    for year in years:
+        year_key = f'mentions_{year}'
+        if year_key in data:
+            year_df = data[year_key]
+            if selected_category in year_df.columns:
+                total = year_df[selected_category].sum()
+                year_totals.append({'Year': year, 'Total': total})
+    
+    if year_totals:
+        df_totals = pd.DataFrame(year_totals)
+        fig_totals = px.bar(
+            df_totals,
+            x='Year',
+            y='Total',
+            title=f'Total {selected_category} Mentions by Year',
+            color='Total',
+            color_continuous_scale='viridis'
+        )
+        fig_totals.update_xaxes(type='category')
+        fig_totals.update_layout(height=400)
+        st.plotly_chart(fig_totals, use_container_width=True)
+    
+    # 2. Activities by Year by Maison Table
+    st.subheader(f"📋 {selected_category} Activities by Year by Maison")
+    
+    # Collect activities data
+    activities_data = {}
+    
+    for year in years:
+        year_key = f'details_{year}'
+        if year_key in data:
+            details_df = data[year_key]
+            
+            # Find category columns for this year
+            category_columns = [col for col in details_df.columns if col.startswith(selected_category)]
+            
+            if category_columns:
+                for _, row in details_df.iterrows():
+                    maison = row['Maison']
+                    activities = []
+                    
+                    for col in category_columns:
+                        if col in row.index and pd.notna(row[col]) and str(row[col]).strip():
+                            activities.append(str(row[col]).strip())
+                    
+                    if activities:
+                        if maison not in activities_data:
+                            activities_data[maison] = {}
+                        activities_data[maison][year] = activities
+    
+    # Create table data
+    if activities_data:
+        # Get all years that have data
+        all_years_with_data = set()
+        for maison_data in activities_data.values():
+            all_years_with_data.update(maison_data.keys())
+        all_years_with_data = sorted(list(all_years_with_data))
+        
+        # Create table
+        table_data = []
+        for maison in sorted(activities_data.keys()):
+            row_data = {'Maison': maison}
+            for year in all_years_with_data:
+                if year in activities_data[maison]:
+                    # Join multiple activities with line breaks
+                    activities = activities_data[maison][year]
+                    numbered_activities = [f"{i+1}. {activity}" for i, activity in enumerate(activities)]
+                    row_data[year] = "<br>".join(numbered_activities)
+                else:
+                    row_data[year] = ""
+            table_data.append(row_data)
+        
+        if table_data:
+            df_table = pd.DataFrame(table_data)
+            
+            # Display as HTML table for better formatting
+            html_table = "<table style='width:100%; border-collapse: collapse;'>"
+            html_table += "<thead><tr style='background-color: #f0f2f6;'>"
+            html_table += f"<th style='border: 1px solid #ddd; padding: 8px;'>Maison</th>"
+            for year in all_years_with_data:
+                html_table += f"<th style='border: 1px solid #ddd; padding: 8px; text-align: center;'>{year}</th>"
+            html_table += "</tr></thead><tbody>"
+            
+            for _, row in df_table.iterrows():
+                html_table += "<tr>"
+                html_table += f"<td style='border: 1px solid #ddd; padding: 8px; font-weight: bold;'>{row['Maison']}</td>"
+                for year in all_years_with_data:
+                    cell_content = row[year] if row[year] != "" else ""
+                    html_table += f"<td style='border: 1px solid #ddd; padding: 8px; vertical-align: top;'>{cell_content}</td>"
+                html_table += "</tr>"
+            
+            html_table += "</tbody></table>"
+            st.markdown(html_table, unsafe_allow_html=True)
+        else:
+            st.info(f"No {selected_category} activities found for any Maison in the available data.")
+    else:
+        st.info(f"No {selected_category} activities found in the data.")
+
 def display_maison_details(data, selected_maison, selected_year):
     """Display detailed view for a specific Maison with multi-year data"""
     st.subheader(f"📊 {selected_maison} - Multi-Year Analysis")
@@ -467,7 +576,7 @@ def display_maison_details(data, selected_maison, selected_year):
                 for category, columns in detail_categories.items():
                     activities = []
                     for col in columns:
-                        if pd.notna(detail_row[col]) and str(detail_row[col]).strip():
+                        if col in detail_row.index and pd.notna(detail_row[col]) and str(detail_row[col]).strip():
                             activities.append(str(detail_row[col]).strip())
                     
                     if activities:
@@ -561,7 +670,10 @@ def main():
     selected_category = st.sidebar.selectbox("Activity Category", ["All"] + categories)
     
     # Main content
-    if selected_maison_mode == "Overview" or (selected_maison_mode != "Multiple Maisons" and selected_maison == "All"):
+    if selected_category != "All":
+        # Category-specific view
+        display_category_view(data, selected_category, selected_year, unique_maisons)
+    elif selected_maison_mode == "Overview" or (selected_maison_mode != "Multiple Maisons" and selected_maison == "All"):
         # KPI Dashboard
         st.header("📊 Key Performance Indicators")
         
